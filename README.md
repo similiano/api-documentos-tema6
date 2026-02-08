@@ -30,3 +30,6 @@ El objetivo es demostrar:
 ```bash
 npm install
 npm run dev
+
+## Entrega final
+- Release/tag final: https://github.com/similar/api-documentos-tema6/releases/tag/v1.0.0
