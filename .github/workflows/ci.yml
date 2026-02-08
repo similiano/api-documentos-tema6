@@ -1,66 +1,81 @@
-name: CI Pipeline
+name: CI/CD Pipeline - Tema 6
 
 on:
   push:
-    branches: [ "principal" ]
+    branches: [ main ]
   pull_request:
-    branches: [ "principal" ]
+    branches: [ main ]
 
 jobs:
-  lint:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout código
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
-      - name: Install dependencies
+      - name: Instalar dependencias
         run: npm install
 
-      - name: Run ESLint
+      - name: Lint
         run: npm run lint
 
-  test:
+      - name: Test + Cobertura
+        run: npm test -- --coverage
+      - name: Verificar cobertura mínima
+        run: |
+          COVERAGE=$(npx jest --coverage --coverageThreshold='{"global":{"branches":80,"functions":80,"lines":80,"statements":80}}')
+          echo "$COVERAGE"
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+      - name: Inicializar CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+      - name: Ejecutar CodeQL
+        uses: github/codeql-action/analyze@v3
+
+  docker:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout código
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Build imagen Docker
+        run: docker build -t documentos-api:latest .
+      - name: Scan CVE con Trivy
+        uses: aquasecurity/trivy-action@master
         with:
-          node-version: '20'
+          image-ref: documentos-api:latest
+          severity: CRITICAL,HIGH
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run tests
-        run: npm test
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build, codeql, docker]
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+      - name: Deploy en staging
+        run: docker compose -f deploy/staging.yml up -d
+      - name: Smoke test /health
+        run: |
+          sleep 10
+          curl -f http://localhost:3000/health || exit 1
 
   zap_scan:
     runs-on: ubuntu-latest
+    needs: deploy
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Levantar API en background
-        run: |
-          npm install
-          npm start &
-          sleep 10
-
-      - name: OWASP ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.9.0
+      - name: OWASP ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.7.0
         with:
           target: 'http://localhost:3000'
-          rules: ''
-          cmd_options: '-a'
